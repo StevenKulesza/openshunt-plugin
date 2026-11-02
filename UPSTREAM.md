@@ -1,5 +1,8 @@
 # Attribution and provenance
 
+Current Open Shunt adaptation author and maintainer: Steven Kulesza.
+Repository: https://github.com/StevenKulesza/openshunt-plugin
+
 This standalone adaptation derives from Spotify’s Shunt plugin in
 https://github.com/spotify/portal-ai-plugins at commit
 `aa252eb21df5bbf32b0beb45f84a2c03341ccad8`.

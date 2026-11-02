@@ -4,7 +4,7 @@
   "version": "0.3.0",
   "description": "Delegate bulk reading and code generation to configurable models through API credentials or a company-owned adapter.",
   "author": {
-    "name": "Spotify"
+    "name": "Steven Kulesza"
   },
   "license": "Apache-2.0",
   "keywords": [
@@ -12,5 +12,6 @@
     "delegation",
     "standalone"
   ],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "repository": "https://github.com/StevenKulesza/openshunt-plugin"
 }

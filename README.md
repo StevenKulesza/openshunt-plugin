@@ -1,5 +1,8 @@
 # Open Shunt
 
+Current Open Shunt author and maintainer: **Steven Kulesza**.
+Derived from Spotify’s original Shunt plugin; see [upstream attribution](UPSTREAM.md).
+
 Route bulk file reading and predictable code generation to models you choose.
 Use your own API credentials or plug in your company's routing client through a
 small executable adapter. No external workflow platform or model registry is required.
