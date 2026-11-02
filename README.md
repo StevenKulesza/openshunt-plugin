@@ -13,6 +13,102 @@ large-read hooks and two skills; those hooks are not installed in other hosts.
 The scripts also work independently from a terminal. Each invocation is one shot: Shunt does not
 maintain conversation history. Provider retention and billing policies still apply.
 
+## Architecture: choose the worker, isolate the bulk input
+
+Open Shunt separates **model selection** from **context isolation**. Model
+selection chooses the configured reader/writer route and transport. Context
+isolation comes from sending file contents directly from a local script or MCP
+server to that worker, rather than asking the lead assistant to read and relay
+those contents. Changing a model ID alone does not create this isolation.
+
+```mermaid
+flowchart LR
+    Lead["Lead assistant in host"] --> Request["Question or spec plus file paths"]
+    Request --> Entry["Open Shunt script or MCP tool"]
+    Files["Selected local files"] --> Entry
+    Entry --> Task{"Reader or writer task"}
+    Task --> Reader["SHUNT_READER_MODEL"]
+    Task --> Writer["SHUNT_WRITER_MODEL"]
+    Reader --> Transport{"Configured transport"}
+    Writer --> Transport
+    Transport --> HTTP["HTTPS Chat Completions endpoint"]
+    Transport --> Adapter["Company executable adapter"]
+    HTTP --> Worker["Selected worker model or route"]
+    Adapter --> Worker
+    Worker --> Result["Summary or generated code"]
+    Result --> Lead
+```
+
+The task instructions and raw files go to the worker; its answer goes back to the
+lead. The lead retains responsibility for reasoning, reviewing output, and making
+precise edits. A reader is instructed to answer concisely, but this is not a
+lossless compressor or an enforced output-size guarantee. A worker can quote raw
+source in its answer. The writer returns code, not necessarily a summary.
+
+### Where the raw state lives
+
+```mermaid
+flowchart TB
+    subgraph HostContext["Lead assistant context"]
+        Intent["Question or spec and paths"]
+        Answer["Returned summary or code"]
+    end
+    subgraph LocalProcess["Local delegation process"]
+        Raw["Raw source files"]
+        Payload["Worker request assembled locally"]
+    end
+    subgraph ProviderBoundary["Configured provider or company client"]
+        Model["Worker receives request and raw source"]
+    end
+    Intent --> Payload
+    Raw --> Payload
+    Payload --> Model
+    Model --> Answer
+    Raw --> Boundary["Raw input is not appended to lead messages"]
+```
+
+This pattern avoids a routine raw-file round trip through the lead's context. It does
+not erase files the lead has already read, prevent a host from reading them later,
+or hide worker output from the host. It is not a security sandbox: selected source
+leaves the local machine for the configured endpoint unless your adapter keeps it
+local. Apply your company's data-handling, logging, and retention policies.
+
+### Who decides to delegate?
+
+- **Claude Code native plugin:** hooks intercept supported large full-file reads
+  and redirect the lead to the bulk-reader skill. They do not intercept every
+  possible read and do not automatically route all tool calls. Code writing is
+  skill-driven.
+- **Codex, Cursor, or Claude Code over MCP:** the host explicitly calls
+  `bulk_read` or `code_write`. MCP exposes tools; it does not install a universal
+  read-interception layer. Project instructions can encourage delegation.
+- **Your own harness:** call the scripts or use the same worker transport from
+  an orchestration layer you control. The [harness examples](examples/harness/)
+  illustrate where routing decisions and separate worker inputs belong; they are
+  not production middleware or a drop-in host-wide interception system.
+
+The runnable harness examples make the state-write decision explicit:
+
+```mermaid
+flowchart LR
+    Tool["Raw tool output held locally"] --> Gate{"Routing gate before state append"}
+    Gate -->|"Small or exact-content task"| Direct["Append approved raw output to lead state"]
+    Gate -->|"Bulk summary task"| Worker["Separate worker request"]
+    Worker --> Cap{"Summary within configured cap?"}
+    Cap -->|"Yes"| Append["Append summary to lead state"]
+    Cap -->|"No or worker failure"| Fail["Fail closed: no raw fallback append"]
+```
+
+This last diagram describes the **example harness policy**, not an implicit filter
+inside every Open Shunt host integration. A real harness must run the gate before
+its own state append; calling a summarizer after appending the raw output is too
+late to isolate that context. The example's summary cap is an application policy,
+not a guarantee that all shell/MCP worker outputs are bounded.
+
+MCP `code_write` returns code for review without writing files. The shell
+`code-write` script additionally supports explicit `--target` writes. Both use
+the configured writer model, and neither executes the generated code.
+
 ## Requirements and local installation
 
 - Bash, Python 3, and standard Unix utilities; `jq` for hooks and hook tests.
