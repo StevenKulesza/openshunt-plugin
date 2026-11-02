@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Minimal sequential MCP stdio server. No HTTP listener or shell execution."""
+import argparse
+import json
+import pathlib
+import subprocess
+import sys
+
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+VERSIONS = ('2025-06-18', '2025-03-26', '2024-11-05')
+TOOLS = [
+    {'name': 'bulk_read', 'description': 'Send selected workspace files to your configured reader model and return a concise answer. File contents leave this process for the configured provider.',
+     'inputSchema': {'type': 'object', 'properties': {'question': {'type': 'string', 'minLength': 1}, 'paths': {'type': 'array', 'items': {'type': 'string', 'minLength': 1}, 'minItems': 1}}, 'required': ['question', 'paths'], 'additionalProperties': False},
+     'annotations': {'readOnlyHint': True, 'openWorldHint': True}},
+    {'name': 'code_write', 'description': 'Generate code using a workspace reference file and the configured writer model. Returns code for review; does not write files. Reference content is sent to the configured provider.',
+     'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'minLength': 1}, 'reference': {'type': 'string', 'minLength': 1}}, 'required': ['spec', 'reference'], 'additionalProperties': False},
+     'annotations': {'readOnlyHint': True, 'openWorldHint': True}},
+]
+
+def error(identifier, code, message):
+    return {'jsonrpc': '2.0', 'id': identifier, 'error': {'code': code, 'message': message}}
+
+def result(identifier, value):
+    return {'jsonrpc': '2.0', 'id': identifier, 'result': value}
+
+def text_result(text, failed=False):
+    return {'content': [{'type': 'text', 'text': text}], 'isError': failed}
+
+class Server:
+    def __init__(self, root):
+        self.root = pathlib.Path(root).resolve(strict=True)
+        if not self.root.is_dir():
+            raise ValueError('workspace must be a directory')
+        self.initialized = False
+
+    def path(self, value):
+        if not isinstance(value, str) or not value:
+            raise ValueError('File paths must be nonempty strings')
+        candidate = (self.root / value).resolve(strict=True)
+        if not candidate.is_relative_to(self.root) or not candidate.is_file():
+            raise ValueError('File must be inside the configured workspace')
+        return str(candidate)
+
+    def call(self, name, args):
+        if not isinstance(args, dict):
+            raise ValueError('arguments must be an object')
+        if name == 'bulk_read':
+            if set(args) != {'question', 'paths'} or not isinstance(args['question'], str) or not args['question'].strip():
+                raise ValueError('Expected question and paths')
+            if not isinstance(args['paths'], list) or not args['paths']:
+                raise ValueError('paths must be a nonempty array')
+            command = [str(SCRIPT_DIR / 'bulk-read'), '--question', args['question'], '--paths'] + [self.path(p) for p in args['paths']]
+        elif name == 'code_write':
+            if set(args) != {'spec', 'reference'} or not isinstance(args['spec'], str) or not args['spec'].strip():
+                raise ValueError('Expected spec and reference; MCP generation does not write targets')
+            command = [str(SCRIPT_DIR / 'code-write'), '--spec', args['spec'], '--reference', self.path(args['reference'])]
+        else:
+            raise ValueError('Unknown tool')
+        completed = subprocess.run(command, cwd=self.root, capture_output=True, text=True, check=False)
+        if completed.returncode:
+            # Never expose arbitrary adapter output or filesystem paths in errors.
+            return text_result('Delegation failed. Check local model/provider configuration and file access.', True)
+        return text_result(completed.stdout)
+
+    def handle(self, message):
+        if not isinstance(message, dict) or message.get('jsonrpc') != '2.0' or not isinstance(message.get('method'), str):
+            return error(message.get('id') if isinstance(message, dict) else None, -32600, 'Invalid Request')
+        if 'id' not in message:
+            return None  # notifications never receive a response
+        identifier = message['id']
+        if isinstance(identifier, (dict, list, bool)) or identifier is None:
+            return error(None, -32600, 'Invalid request id')
+        method, params = message['method'], message.get('params', {})
+        if not isinstance(params, dict):
+            return error(identifier, -32602, 'params must be an object')
+        if method == 'initialize':
+            version = params.get('protocolVersion')
+            self.initialized = True
+            return result(identifier, {'protocolVersion': version if version in VERSIONS else VERSIONS[0], 'capabilities': {'tools': {'listChanged': False}}, 'serverInfo': {'name': 'open-shunt', 'version': '0.3.0'}})
+        if method == 'ping':
+            return result(identifier, {})
+        if not self.initialized:
+            return error(identifier, -32000, 'Initialize first')
+        if method == 'tools/list':
+            return result(identifier, {'tools': TOOLS})
+        if method == 'tools/call':
+            if not isinstance(params.get('name'), str) or params['name'] not in {tool['name'] for tool in TOOLS}:
+                return error(identifier, -32602, 'Unknown tool')
+            try:
+                return result(identifier, self.call(params['name'], params.get('arguments', {})))
+            except (ValueError, OSError, TypeError, RuntimeError):
+                return result(identifier, text_result('Invalid arguments or inaccessible workspace file.', True))
+        return error(identifier, -32601, 'Method not found')
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--workspace', required=True, help='Trusted workspace directory; relative tool paths resolve here')
+    args = parser.parse_args()
+    try:
+        server = Server(args.workspace)
+    except (ValueError, OSError):
+        parser.error('workspace must be an existing directory')
+    for line in sys.stdin.buffer:
+        try:
+            response = server.handle(json.loads(line))
+        except (ValueError, UnicodeError):
+            response = error(None, -32700, 'Parse error')
+        if response is not None:
+            print(json.dumps(response), flush=True)
+
+if __name__ == '__main__':
+    main()

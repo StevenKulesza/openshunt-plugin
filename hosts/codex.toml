@@ -1,0 +1,14 @@
+# Merge into ~/.codex/config.toml or a trusted project's .codex/config.toml.
+# Replace every /absolute/path placeholder and model ID before using.
+[mcp_servers.open-shunt]
+command = "python3"
+args = ["/absolute/path/to/open-shunt/scripts/shunt-mcp", "--workspace", "/absolute/path/to/your/project"]
+tool_timeout_sec = 240
+env_vars = ["SHUNT_API_KEY"]
+
+[mcp_servers.open-shunt.env]
+SHUNT_PROVIDER = "openai-compatible"
+SHUNT_API_URL = "https://your-approved-endpoint.example/v1/chat/completions"
+SHUNT_READER_MODEL = "your-reader-model-id"
+SHUNT_WRITER_MODEL = "your-writer-model-id"
+SHUNT_TIMEOUT_SECONDS = "180"

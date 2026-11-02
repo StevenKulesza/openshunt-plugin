@@ -1,0 +1,16 @@
+{
+  "name": "open-shunt",
+  "displayName": "Open Shunt",
+  "version": "0.3.0",
+  "description": "Delegate bulk reading and code generation to configurable models through API credentials or a company-owned adapter.",
+  "author": {
+    "name": "Spotify"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "model-routing",
+    "delegation",
+    "standalone"
+  ],
+  "skills": "./skills/"
+}
